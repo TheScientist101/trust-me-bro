@@ -1,4 +1,4 @@
-POST http://localhost:8080/register
+POST http://10.10.16.184:8080/register
 Content-Type: application/json
 
 {

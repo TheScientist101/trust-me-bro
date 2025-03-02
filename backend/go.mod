@@ -8,10 +8,13 @@ require (
 	firebase.google.com/go/v4 v4.15.2
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/pjebs/jsonerror v0.0.0-20190614034432-63ef9a8df848
+	github.com/scizorman/go-ndjson v0.0.0-20200902005011-1d92486df71e
 	github.com/unrolled/render v1.7.0
 	golang.org/x/crypto v0.35.0
+	google.golang.org/api v0.215.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
@@ -67,7 +70,6 @@ require (
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
-	google.golang.org/api v0.215.0 // indirect
 	google.golang.org/appengine/v2 v2.0.6 // indirect
 	google.golang.org/genproto v0.0.0-20241118233622-e639e219e697 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241209162323-e6fa225c2576 // indirect

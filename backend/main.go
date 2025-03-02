@@ -1,9 +1,6 @@
 package main
 
 import (
-	"context"
-	firebase "firebase.google.com/go/v4"
-	"google.golang.org/api/option"
 	"log"
 	"net/http"
 	"os"
@@ -44,13 +41,7 @@ func main() {
 		os.Getenv("PUBLIC_KEY_PATH"),
 	)
 
-	opt := option.WithCredentialsFile(os.Getenv("FIREBASE_CREDS_PATH"))
-	app, err := firebase.NewApp(context.Background(), nil, opt)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = NewTransactionService(db, us, app)
+	_, err = NewTransactionService(db, us)
 	if err != nil {
 		panic(err)
 	}

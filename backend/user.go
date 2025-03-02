@@ -38,9 +38,10 @@ type User struct {
 	LastName           string    `gorm:"not null"`
 	Password           []byte    `gorm:"not null"`
 	Email              string    `gorm:"unique,not null"`
-	RegistrationToken  string    // for FCM
+	RegistrationToken  string
 	RefreshToken       string
 	AccessToken        string
+	Amount             float64
 	RefreshTokenExpiry sql.NullTime
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -94,7 +95,7 @@ func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, privateKeyPath, pub
 		panic(err)
 	}
 
-	pubicKey, err := jwt.ParseECPublicKeyFromPEM(pem)
+	publicKey, err := jwt.ParseECPublicKeyFromPEM(pem)
 	if err != nil {
 		panic(err)
 	}
@@ -107,11 +108,12 @@ func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, privateKeyPath, pub
 		panic(err)
 	}
 
-	service := &UserService{db, emailDialer, privateKey, pubicKey}
+	service := &UserService{db, emailDialer, privateKey, publicKey}
 
 	http.HandleFunc("/register", service.HandleRegister)
 	http.HandleFunc("/verify", service.VerifyUser)
 	http.HandleFunc("/login", service.Login)
+	http.HandleFunc("/userdata", service.GetUserData)
 
 	return service
 }
@@ -120,13 +122,6 @@ func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, privateKeyPath, pub
 func RenderErrorTemplate(w http.ResponseWriter, templateName string, data interface{}) {
 	if err := render.New().HTML(w, http.StatusOK, templateName, data); err != nil {
 		log.Fatal(err)
-	}
-}
-
-// RenderJSONResponse Utility function to render JSON responses
-func RenderJSONResponse(w http.ResponseWriter, status int, response interface{}) {
-	if err := render.New().JSON(w, status, response); err != nil {
-		log.Println(err)
 	}
 }
 
@@ -163,13 +158,13 @@ func (service *UserService) SendVerificationEmail(user UnverifiedUser, host stri
 	}
 
 	m := gomail.NewMessage()
-	m.SetHeader("From", "thescientist101@hackclub.app")
+	m.SetHeader("From", service.emailDialer.Username)
 	m.SetHeader("To", user.Email)
 	m.SetHeader("Subject", "Verify Email")
 	m.SetBody("text/html", tpl)
 
-	if err := service.emailDialer.DialAndSend(m); err != nil {
-		log.Fatalln(err)
+	if err = service.emailDialer.DialAndSend(m); err != nil {
+		log.Println(err)
 	}
 }
 
@@ -240,6 +235,7 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 		UUID:      unverifiedUser.UUID,
 		Password:  unverifiedUser.Password,
 		Email:     unverifiedUser.Email,
+		Amount:    10,
 	}
 
 	if err := service.db.Create(user).Error; err != nil {
@@ -524,6 +520,39 @@ func (service *UserService) AuthenticateRequest(accessToken string) (*User, *Res
 	}
 
 	return nil, NewError(15, "Invalid token", "Invalid token")
+}
+
+type UserDataRequest struct {
+	AccessToken string `json:"access_token"`
+}
+
+type UserDataResponse struct {
+	Success   bool    `json:"success"`
+	Balance   float64 `json:"balance"`
+	FirstName string  `json:"first_name"`
+	LastName  string  `json:"last_name"`
+	Email     string  `json:"email"`
+}
+
+func (service *UserService) GetUserData(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
+	if r.Method != http.MethodPost {
+		return
+	}
+
+	request := &UserDataRequest{}
+	if err := json.NewDecoder(r.Body).Decode(request); err != nil {
+		InvalidJSONError(w, err)
+	}
+
+	user, authResponse := service.AuthenticateRequest(request.AccessToken)
+	if authResponse != nil {
+		RenderJSONResponse(w, http.StatusInternalServerError, authResponse)
+		return
+	}
+
+	RenderJSONResponse(w, 200, &UserDataResponse{true, user.Amount, user.FirstName, user.LastName, user.Email})
 }
 
 func (service *UserService) GetUser(uuid string) (*User, error) {

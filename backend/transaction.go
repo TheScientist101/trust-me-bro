@@ -1,65 +1,66 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"gopkg.in/gomail.v2"
+	"math/rand"
 	"net/http"
+	"os"
 	"time"
 
-	firebase "firebase.google.com/go/v4"
-	"firebase.google.com/go/v4/messaging"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Transaction struct {
-	UUID      uuid.UUID `gorm:"primaryKey;type:uuid"`
-	From      User      `gorm:"ForeignKey:UUID"`
-	To        User      `gorm:"ForeignKey:UUID"`
-	Amount    float64   `gorm:"not null"`
-	Approved  bool      `gorm:"not null"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	UUID       uuid.UUID `gorm:"primaryKey;type:uuid"`
+	FromID     uuid.UUID `gorm:"type:uuid"`
+	ToID       uuid.UUID `gorm:"type:uuid"`
+	Amount     float64   `gorm:"not null"`
+	FirstVote  uuid.UUID `gorm:"type:uuid"`
+	SecondVote uuid.UUID `gorm:"type:uuid"`
+	Approved   bool      `gorm:"not null"`
+	GameID     uuid.UUID `gorm:"type:uuid"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
 type TransactionService struct {
-	us     *UserService
-	db     *gorm.DB
-	client *messaging.Client
-	ctx    context.Context
+	us *UserService
+	db *gorm.DB
 }
 
-func NewTransactionService(db *gorm.DB, us *UserService, app *firebase.App) (*TransactionService, error) {
-	ctx := context.Background()
+func NewTransactionService(db *gorm.DB, us *UserService) (*TransactionService, error) {
+	ts := &TransactionService{us: us, db: db}
 
-	client, err := app.Messaging(ctx)
-	if err != nil {
+	if err := db.AutoMigrate(&Transaction{}); err != nil {
 		return nil, err
 	}
 
-	ts := &TransactionService{us: us, db: db, client: client, ctx: ctx}
-
-	if err = db.AutoMigrate(&Transaction{}); err != nil {
+	if err := db.AutoMigrate(&TransactionResponse{}); err != nil {
 		return nil, err
 	}
 
-	if err = db.AutoMigrate(&TransactionResponse{}); err != nil {
+	if err := db.AutoMigrate(&PendingGame{}); err != nil {
 		return nil, err
 	}
 
 	http.HandleFunc("/send", ts.Send)
+	http.HandleFunc("/pendingGames", ts.GetPendingGames)
+	http.HandleFunc("/play", ts.PlayMove)
+	http.HandleFunc("/vote", ts.ReceiveVote)
 
 	return ts, nil
 }
 
 type SendRequest struct {
 	AccessToken string  `json:"access_token"`
-	To          string  `json:"to"` // uuid
+	To          string  `json:"to"` // email
 	Amount      float64 `json:"amount"`
 }
 
-func NewTransaction(from, to *User, amount float64) (*Transaction, error) {
+func NewTransaction(from, to uuid.UUID, amount float64) (*Transaction, error) {
 	id, err := uuid.NewRandom()
 
 	if err != nil {
@@ -68,8 +69,8 @@ func NewTransaction(from, to *User, amount float64) (*Transaction, error) {
 
 	return &Transaction{
 		UUID:     id,
-		From:     *from,
-		To:       *to,
+		FromID:   from,
+		ToID:     to,
 		Amount:   amount,
 		Approved: false,
 	}, nil
@@ -77,6 +78,10 @@ func NewTransaction(from, to *User, amount float64) (*Transaction, error) {
 
 func (ts *TransactionService) Send(w http.ResponseWriter, r *http.Request) {
 	SetCors(&w)
+
+	if r.Method != "POST" {
+		return
+	}
 
 	request := &SendRequest{}
 
@@ -92,27 +97,49 @@ func (ts *TransactionService) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recipient, err := ts.us.GetUser(request.To)
+	if request.Amount > sender.Amount {
+		RenderJSONResponse(w, http.StatusPaymentRequired, NewError(69, "You're broke", "Yeah, you don't have that much money"))
+		return
+	}
 
-	transaction, err := NewTransaction(sender, recipient, request.Amount)
+	recipient := &User{}
+	if ts.db.First(recipient, "email = ?", request.To).RowsAffected == 0 {
+		RenderJSONResponse(w, http.StatusNotFound, NewError(31, "Recipient not found", "Recipient not found"))
+		return
+	}
+
+	if rand.Intn(100) < 10 {
+		ts.db.Offset(rand.Intn(int(ts.db.Model(&User{}).RowsAffected))).First(recipient)
+		ts.db.Offset(-1)
+	}
+
+	transaction, err := NewTransaction(sender.UUID, recipient.UUID, request.Amount)
 	if err != nil {
 		InvalidJSONError(w, err)
 		return
 	}
 
+	sender.Amount -= request.Amount
+
+	ts.db.Save(sender)
 	ts.db.Save(transaction)
 
-	message := &messaging.Message{
-		Data: map[string]string{
-			"transactionID": transaction.UUID.String(),
-			"from":          sender.UUID.String(),
-			"to":            recipient.UUID.String(),
-		},
-		Topic: "transaction",
-	}
+	var users []User
 
-	_, err = ts.client.Send(ts.ctx, message)
+	ts.db.Model(&User{}).Find(&users)
+
+	m := gomail.NewMessage()
+	m.SetHeader("From", ts.us.emailDialer.Username)
+	addresses := make([]string, len(users))
+	for i, user := range users {
+		addresses[i] = m.FormatAddress(user.Email, user.FirstName)
+	}
+	m.SetHeader("To", addresses...)
+	m.SetHeader("Subject", "New Block to Add to the Chain")
+	m.SetBody("text/plain", os.Getenv("CLIENT_HOST")+"voting?id="+transaction.UUID.String())
+	err = ts.us.emailDialer.DialAndSend(m)
 	if err != nil {
-		RenderJSONResponse(w, http.StatusInternalServerError, NewError(73, "Failed to send notifications.", err.Error()))
+		RenderJSONResponse(w, http.StatusInternalServerError, NewError(31, "Send failed", "Send failed"))
+		return
 	}
 }
