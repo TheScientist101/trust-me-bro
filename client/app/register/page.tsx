@@ -50,7 +50,7 @@ export default function RegisterPage() {
                 className="w-full max-w-md flex flex-col gap-4 items-center"
                 onSubmit={onSubmit}
             >
-                {success && <p className="text-white">Successfully registered! Check your email for a verification link.</p>}
+                {success && <p className="text-white">Successfully registered! Check your email for a verification link. Be sure to check spam (it always goes there).</p>}
                 {error && <p className="text-red-500">{error}</p>}
                 <Input
                     isRequired
