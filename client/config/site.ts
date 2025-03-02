@@ -48,6 +48,6 @@ export const siteConfig = {
   links: {
     github: "https://github.com/TheScientist101/trust-me-bro",
     register: "/register",
-    server: "http://localhost:8080",
+    server: "https://trust.thescientist101.hackclub.app",
   },
 };
